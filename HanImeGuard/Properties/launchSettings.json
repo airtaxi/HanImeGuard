@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "HanImeGuard (Package)": {
+      "commandName": "MsixPackage"
+    },
+    "HanImeGuard (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}
