@@ -38,44 +38,116 @@ public sealed class PhotoshopAutomationAdapter() : AdobeAutomationAdapterBase("P
 
     var lines = [encodeValue(documentKey)];
 
-    function layerRecordKey(layer, layerPath) {
-        var identifier = readValue(function () { return layer.id; }, "");
-        if (!identifier) identifier = layerPath;
-        return "layer:" + identifier;
+    function typeIdentifier(value) {
+        return stringIDToTypeID(value);
     }
 
-    function layerText(layer) {
-        try {
-            if (layer.typename === "ArtLayer" && layer.kind === LayerKind.TEXT && layer.textItem) return layer.textItem.contents;
-        } catch (ignored) {}
-
-        return "";
+    function charIdentifier(value) {
+        return charIDToTypeID(value);
     }
 
-    function isTextLayer(layer) {
+    function descriptorHasValue(descriptor, key) {
         try {
-            return layer.typename === "ArtLayer" && layer.kind === LayerKind.TEXT && layer.textItem;
+            return descriptor && descriptor.hasKey(key);
         } catch (ignored) {}
 
         return false;
     }
 
-    function visitLayers(layers, parentPath) {
-        for (var layerIndex = 0; layerIndex < layers.length; layerIndex++) {
-            try {
-                var layer = layers[layerIndex];
-                var layerPath = parentPath + "/" + layerIndex;
-                var name = readValue(function () { return layer.name; }, "");
-                var text = layerText(layer);
-                var textLayer = isTextLayer(layer);
-                lines.push(encodeValue(layerRecordKey(layer, layerPath)) + "\t" + hashText(name) + "\t" + hashText(text) + "\t" + encodeValue(name) + "\t" + encodeValue(text) + "\t" + (textLayer ? "1" : "0"));
+    function descriptorStringValue(descriptor, key) {
+        try {
+            if (descriptorHasValue(descriptor, key)) return descriptor.getString(key);
+        } catch (ignored) {}
 
-                if (layer.typename === "LayerSet") visitLayers(layer.layers, layerPath);
-            } catch (ignored) {}
-        }
+        return "";
     }
 
-    visitLayers(document.layers, "");
+    function descriptorIntegerValue(descriptor, key) {
+        try {
+            if (descriptorHasValue(descriptor, key)) return descriptor.getInteger(key);
+        } catch (ignored) {}
+
+        return "";
+    }
+
+    function activeLayerDescriptor() {
+        var reference = new ActionReference();
+        reference.putEnumerated(charIdentifier("Lyr "), charIdentifier("Ordn"), charIdentifier("Trgt"));
+        return executeActionGet(reference);
+    }
+
+    function descriptorLayerText(descriptor, allowActiveLayerFallback) {
+        try {
+            var textKeyIdentifier = typeIdentifier("textKey");
+            if (descriptorHasValue(descriptor, textKeyIdentifier)) {
+                var textDescriptor = descriptor.getObjectValue(textKeyIdentifier);
+                var textIdentifier = charIdentifier("Txt ");
+                if (descriptorHasValue(textDescriptor, textIdentifier)) return textDescriptor.getString(textIdentifier);
+            }
+        } catch (ignored) {}
+
+        if (!allowActiveLayerFallback) return "";
+
+        return readValue(function () {
+            var layer = app.activeDocument.activeLayer;
+            if (layer.typename === "ArtLayer" && layer.kind === LayerKind.TEXT && layer.textItem) return layer.textItem.contents;
+            return "";
+        }, "");
+    }
+
+    function descriptorIsTextLayer(descriptor, allowActiveLayerFallback) {
+        try {
+            if (descriptorHasValue(descriptor, typeIdentifier("textKey"))) return true;
+        } catch (ignored) {}
+
+        if (!allowActiveLayerFallback) return false;
+
+        return readValue(function () {
+            var layer = app.activeDocument.activeLayer;
+            return layer.typename === "ArtLayer" && layer.kind === LayerKind.TEXT && layer.textItem;
+        }, false) === true;
+    }
+
+    function layerDescriptorByIdentifier(layerIdentifier) {
+        try {
+            if (!layerIdentifier) return null;
+
+            var reference = new ActionReference();
+            reference.putIdentifier(charIdentifier("Lyr "), Number(layerIdentifier));
+            return executeActionGet(reference);
+        } catch (ignored) {}
+
+        return null;
+    }
+
+    function appendLayerRecord(layerDescriptor, fallbackLayerIdentifier, allowActiveLayerFallback) {
+        if (!layerDescriptor) return "";
+
+        var layerIdentifier = descriptorIntegerValue(layerDescriptor, typeIdentifier("layerID"));
+        if (!layerIdentifier) layerIdentifier = fallbackLayerIdentifier;
+        if (!layerIdentifier && allowActiveLayerFallback) layerIdentifier = readValue(function () { return app.activeDocument.activeLayer.id; }, "");
+        if (!layerIdentifier) return "";
+
+        var layerName = descriptorStringValue(layerDescriptor, charIdentifier("Nm  "));
+        if (!layerName && allowActiveLayerFallback) layerName = readValue(function () { return app.activeDocument.activeLayer.name; }, layerName);
+
+        var layerText = descriptorLayerText(layerDescriptor, allowActiveLayerFallback);
+        var textLayer = descriptorIsTextLayer(layerDescriptor, allowActiveLayerFallback);
+        lines.push(encodeValue("layer:" + layerIdentifier) + "\t" + hashText(layerName) + "\t" + hashText(layerText) + "\t" + encodeValue(layerName) + "\t" + encodeValue(layerText) + "\t" + (textLayer ? "1" : "0"));
+        return String(layerIdentifier);
+    }
+
+    var layerDescriptor = activeLayerDescriptor();
+    var currentLayerIdentifier = appendLayerRecord(layerDescriptor, "", true);
+    var previousDocumentKey = readValue(function () { return $.global.HanImeGuardPreviousDocumentKey; }, "");
+    var previousLayerIdentifier = readValue(function () { return $.global.HanImeGuardPreviousLayerIdentifier; }, "");
+
+    if (previousDocumentKey === documentKey && previousLayerIdentifier && previousLayerIdentifier !== currentLayerIdentifier) {
+        appendLayerRecord(layerDescriptorByIdentifier(previousLayerIdentifier), previousLayerIdentifier, false);
+    }
+
+    $.global.HanImeGuardPreviousDocumentKey = documentKey;
+    $.global.HanImeGuardPreviousLayerIdentifier = currentLayerIdentifier;
     return lines.join("\n");
 }());
 """;

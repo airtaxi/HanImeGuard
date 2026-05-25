@@ -22,9 +22,6 @@ public sealed class AdobeInputSnapshotService : IDisposable
     private AdobeForegroundTarget _activeTarget = new(null, 0);
     private AdobeSnapshot? _previousSnapshot;
     private CursorPoint? _previousCursorPoint;
-    private AdobeForegroundTarget _pendingSnapshotTarget = new(null, 0);
-    private InputSnapshotTriggerKind _pendingSnapshotTriggerKind;
-    private bool _hasPendingSnapshot;
     private bool _isCapturingSnapshot;
     private bool _disposed;
 
@@ -178,35 +175,13 @@ public sealed class AdobeInputSnapshotService : IDisposable
 
         if (_isCapturingSnapshot)
         {
-            QueuePendingSnapshot(targetAtTriggerStart, triggerKind);
+            DebugLog.WriteLine($"Snapshot skipped because previous capture is still running. trigger={triggerKind}");
             return;
         }
 
         _isCapturingSnapshot = true;
         try { await CaptureSnapshotCoreAsync(targetAtTriggerStart, triggerKind, automationAdapter); }
         finally { _isCapturingSnapshot = false; }
-
-        RunPendingSnapshotIfNeeded();
-    }
-
-    private void QueuePendingSnapshot(AdobeForegroundTarget targetAtTriggerStart, InputSnapshotTriggerKind triggerKind)
-    {
-        _pendingSnapshotTarget = targetAtTriggerStart;
-        _pendingSnapshotTriggerKind = triggerKind;
-        _hasPendingSnapshot = true;
-        DebugLog.WriteLine($"Snapshot queued because previous capture is still running. trigger={triggerKind}");
-    }
-
-    private void RunPendingSnapshotIfNeeded()
-    {
-        if (!_hasPendingSnapshot) return;
-
-        var pendingSnapshotTarget = _pendingSnapshotTarget;
-        var pendingSnapshotTriggerKind = _pendingSnapshotTriggerKind;
-        _pendingSnapshotTarget = new AdobeForegroundTarget(null, 0);
-        _pendingSnapshotTriggerKind = default;
-        _hasPendingSnapshot = false;
-        _ = CaptureSnapshotAsync(pendingSnapshotTarget, pendingSnapshotTriggerKind);
     }
 
     private async Task CaptureSnapshotCoreAsync(AdobeForegroundTarget targetAtTriggerStart, InputSnapshotTriggerKind triggerKind, IAdobeAutomationAdapter automationAdapter)
